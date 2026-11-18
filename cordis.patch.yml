@@ -1,14 +1,21 @@
 # Better Auto Review bundle patch
 #
 # Two loader operations:
-# 1. Override the core `permission` row to add an `auto-review` preset
+# 1. Override the core `permission` row to add an `auto-mode` preset
 #    (workspace-write + ask). A patch replaces the row's whole config, so every
-#    built-in preset is restated here.
+#    built-in preset is restated here. The key is `auto-mode` on purpose: the
+#    Claude-style skin's fixed "Auto" segment maps `auto-mode` before `auto`, so
+#    choosing Auto there runs this reviewer instead of the built-in every-call
+#    auto reviewer.
 # 2. Insert this bundle's own plugin row, wired to the reviewer route.
 
 - id: permission
   name: '@deepseek-ai/dsh-permission-presets'
   config:
+    # New sessions start in the reviewer-backed preset automatically, so the
+    # user never has to pick "Better Auto Review" by hand. They can still switch
+    # to any other preset from the selector; a later session re-applies this.
+    defaultPreset: auto-mode
     presets:
       read-only:
         sandbox: read-only
@@ -25,7 +32,7 @@
         approval: never
         name: danger-full-access
         description: Full file access without approval prompts.
-      auto-review:
+      auto-mode:
         sandbox: workspace-write
         approval: ask
         name: Better Auto Review
@@ -39,7 +46,7 @@
         model: codex/gpt-6.2-sol
         reasoningEffort: medium
         maxTokens: 600
-        preset: auto-review
+        preset: auto-mode
         baselineSandbox: workspace-write
         maxConsecutiveDenials: 3
         onError: deny

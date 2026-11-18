@@ -43,7 +43,7 @@ function makeCtx(session, reviewText) {
     tools: {},
     llm: {
       stream: (options) => (async function* () {
-        log.push(['llm', options.provider, options.model])
+        log.push(['llm', options.provider, options.model, options])
         yield { type: 'text-delta', index: 0, text: reviewText }
         yield { type: 'finish', reason: { kind: 'stop' } }
       })(),
@@ -64,7 +64,7 @@ function makeCtx(session, reviewText) {
   return ctx
 }
 
-function makeSession(events = USER_EVENTS, preset = 'auto-review') {
+function makeSession(events = USER_EVENTS, preset = 'auto-mode') {
   return { id: 's1', preset, snapshotEvents: () => events }
 }
 
@@ -101,6 +101,47 @@ test('allows a sandbox escalation once, then the approval token is consumed', as
   assert.equal(await approve({ agent: exec.agent, toolName: 'write', callId: 'call-1' }, unavailableNext), 'allowed-once')
   assert.equal(await approve({ agent: exec.agent, toolName: 'write', callId: 'call-1' }, unavailableNext), 'unavailable')
   assert.equal(llmCalls(), 1)
+})
+
+test('reviewer prompt carries recent user intent, skips system context, and states the repair policy', async () => {
+  const events = []
+  for (let i = 1; i <= 7; i += 1) {
+    events.push({
+      type: 'user/message',
+      data: { source: { kind: 'user' }, content: [{ type: 'text', text: `intent-${i}` }] },
+    })
+    events.push({
+      type: 'user/message',
+      data: { source: { kind: 'runtime-context' }, content: [{ type: 'text', text: `SYSTEM-${i}` }] },
+    })
+  }
+  // Harness notices sometimes arrive as source.kind 'user'; they must not crowd
+  // the real request out of the recent-intent window.
+  for (const notice of [
+    'Time sampled while preparing turn 6, step 200: 2026-11-18T16:39:37+08:00[Asia/Singapore]',
+    '[system-reminder]\nCurrent DSH file policy: workspace-write.',
+    '[Compressed conversation section] — synthetic summary',
+    '[folded images: [image: png 10x10 · m00001]]',
+  ]) {
+    events.push({
+      type: 'user/message',
+      data: { source: { kind: 'user' }, content: [{ type: 'text', text: notice }] },
+    })
+  }
+  const { pre, ctx } = setup('{"decision":"allow"}', {}, makeSession(events))
+  await pre(makeExec(makeSession(events), ESCALATION_ARGS), allowNext)
+  const options = ctx.log.find((entry) => entry[0] === 'llm')[3]
+  const prompt = options.messages[0].content[0].text
+  assert.match(prompt, /intent-2/)
+  assert.match(prompt, /intent-7/)
+  assert.doesNotMatch(prompt, /intent-1\b/)
+  assert.doesNotMatch(prompt, /SYSTEM-/)
+  assert.doesNotMatch(prompt, /Time sampled while preparing turn/)
+  assert.doesNotMatch(prompt, /\[system-reminder\]/)
+  assert.doesNotMatch(prompt, /Compressed conversation section/)
+  assert.match(options.system, /Do not require an explicit phrase authorizing Windows permission changes/)
+  assert.match(options.system, /setintegritylevel/)
+  assert.match(options.system, /git add and git commit/)
 })
 
 test('denies a sandbox escalation with the reviewer reason', async () => {
@@ -154,15 +195,22 @@ test('hands the third consecutive denial to the human', async () => {
   assert.equal(third.kind, 'ask')
 })
 
-test('ignores sessions that are not on the auto-review preset', async () => {
+test('ignores sessions that are not on the auto-mode preset', async () => {
   const { pre, llmCalls } = setup('{"decision":"deny"}', {}, makeSession(USER_EVENTS, 'workspace-write'))
   assert.deepEqual(await pre(makeExec(makeSession(USER_EVENTS, 'workspace-write'), ESCALATION_ARGS), allowNext), { kind: 'allow' })
   assert.equal(llmCalls(), 0)
 })
 
-test('migrates the built-in auto preset to auto-review', () => {
+test('migrates the built-in auto preset to auto-mode', () => {
   const session = makeSession([], 'auto')
   const ctx = makeCtx(session, '{"decision":"allow"}')
   apply(ctx, {})
-  assert.equal(session.preset, 'auto-review')
+  assert.equal(session.preset, 'auto-mode')
+})
+
+test('migrates an earlier auto-review session to auto-mode', () => {
+  const session = makeSession([], 'auto-review')
+  const ctx = makeCtx(session, '{"decision":"allow"}')
+  apply(ctx, {})
+  assert.equal(session.preset, 'auto-mode')
 })

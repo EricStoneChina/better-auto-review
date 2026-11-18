@@ -32,7 +32,7 @@ Better Auto Review takes the Codex approach:
 The plugin listens on `tools/pre-execute` and only proceeds when all of these hold:
 
 1. the call belongs to an agent (nested `run_code` calls included; the outer `run_code` wrapper is skipped);
-2. the session's permission preset is the configured preset (`auto-review` by default);
+2. the session's permission preset is the configured preset (`auto-mode` by default);
 3. the tool arguments contain a string `sandbox_permissions`;
 4. `rank(sandbox_permissions) > rank(baselineSandbox)`, where the rank is
    `read-only = 0`, `workspace-write = 1`, `danger-full-access = 2`.
@@ -68,7 +68,7 @@ Then add the bundle to the profile's `package.json`:
 }
 ```
 
-Restart DSH (or use the plugin manager to enable the bundle). The bundle patch inserts the plugin row and adds the **Better Auto Review** permission preset.
+Restart DSH (or use the plugin manager to enable the bundle). The bundle patch inserts the plugin row, adds the **Better Auto Review** permission preset, and makes it the default for new sessions.
 
 ### From GitHub (pre-release / development)
 
@@ -80,9 +80,9 @@ Use the same `dsh.profile.bundles` entry with the package name.
 
 ### Enable it
 
-Open a session's permission selector and choose **Better Auto Review**. The preset uses `workspace-write` plus `approval: ask`; the plugin intercepts only escalation requests, so normal workspace work is unaffected.
+The bundle makes **Better Auto Review** the default preset for new sessions (via `defaultPreset: auto-mode` in the bundle's `cordis.patch.yml`), so you never have to pick it by hand. New sessions start on it with `workspace-write` plus `approval: ask`, and the plugin intercepts only escalation requests, so normal workspace work is unaffected. You can still switch any session to another preset from the permission selector; the default only applies to sessions created afterwards. The preset key is `auto-mode` deliberately: the Claude-style skin's fixed four-button control maps its **Auto** button to `auto-mode` before `auto`, so Auto runs this reviewer instead of the built-in every-call reviewer, with no fifth button and no source edits.
 
-Sessions still on the built-in `auto` preset are migrated to `auto-review` when their agent appears. The built-in plugin is intentionally kept installed so old sessions can still restore without errors.
+Sessions still on the built-in `auto` preset (or the earlier `auto-review` key) are migrated to `auto-mode` when their agent appears. The built-in plugin is intentionally kept installed so old sessions can still restore without errors.
 
 ## Configuration
 
@@ -95,7 +95,7 @@ Defaults live in the bundle's [cordis.patch.yml](cordis.patch.yml). Override the
     model: codex/gpt-6.2-sol
     reasoningEffort: medium
     maxTokens: 600
-    preset: auto-review
+    preset: auto-mode
     baselineSandbox: workspace-write
     maxConsecutiveDenials: 3
     onError: deny
@@ -107,7 +107,7 @@ Defaults live in the bundle's [cordis.patch.yml](cordis.patch.yml). Override the
 | `model` | `codex/gpt-6.2-sol` | Reviewer model |
 | `reasoningEffort` | `medium` | Optional reasoning effort; empty uses the adapter default |
 | `maxTokens` | `600` | Reviewer output cap |
-| `preset` | `auto-review` | Permission preset this plugin is active on |
+| `preset` | `auto-mode` | Permission preset this plugin is active on |
 | `baselineSandbox` | `workspace-write` | Anything at or below this rank is not reviewed |
 | `maxConsecutiveDenials` | `3` | Denials before a manual decision |
 | `onError` | `deny` | `deny` (fail closed) or `ask` on reviewer failure |
@@ -118,9 +118,11 @@ The reviewer can be any route your DSH LLM configuration exposes. It does not ha
 
 - current working directory;
 - baseline and requested sandbox modes;
-- the last two genuine user messages (treated as trusted intent);
+- the last six genuine user messages (treated as trusted intent);
 - the names and truncated arguments of the last eight tool calls;
 - the full name and arguments of the pending call, including `justification`.
+
+The reviewer is instructed to allow routine development work and local diagnostics or repairs (including fixing workspace file permissions) and to deny only clear high-risk actions. A broad "continue", "fix it", or complaint that something keeps failing is enough intent for reversible local repair, and every denial must give a concrete reason.
 
 Tool names, arguments and any text inside them are treated as **untrusted data**; only user messages are treated as authorisation. The reviewer must answer with strict JSON:
 

@@ -32,7 +32,7 @@ Better Auto Review 采用 Codex 的思路：
 插件监听 `tools/pre-execute`，只有以下条件全部满足才进入审查：
 
 1. 调用属于某个 agent（`run_code` 内部的嵌套调用也算；最外层 `run_code` 包装跳过）；
-2. 会话的权限预设等于配置的预设（默认 `auto-review`）；
+2. 会话的权限预设等于配置的预设（默认 `auto-mode`）；
 3. 工具参数里含有字符串 `sandbox_permissions`；
 4. `rank(sandbox_permissions) > rank(baselineSandbox)`，等级为
    `read-only = 0`、`workspace-write = 1`、`danger-full-access = 2`。
@@ -68,7 +68,7 @@ pnpm add @ericstonechina/better-auto-review
 }
 ```
 
-重启 DSH（或用插件管理器启用）。该 bundle 的 patch 会插入插件行，并新增 **Better Auto Review** 权限预设。
+重启 DSH（或用插件管理器启用）。该 bundle 的 patch 会插入插件行，新增 **Better Auto Review** 权限预设，并将其设为新会话的默认预设。
 
 ### 从 GitHub 安装（预发布 / 开发版）
 
@@ -80,9 +80,9 @@ pnpm add github:EricStoneChina/better-auto-review
 
 ### 启用
 
-在会话的权限选择器中选择 **Better Auto Review**。该预设为 `workspace-write` + `approval: ask`，普通工作区操作不受影响，只有提权请求会被拦截审查。
+bundle 会把 **Better Auto Review** 设为新会话的默认预设（通过在 bundle 的 `cordis.patch.yml` 中设置 `defaultPreset: auto-mode`），因此你无需手动选择。新会话会直接以 `workspace-write` + `approval: ask` 启动，插件只拦截提权请求，普通工作区操作不受影响。你仍可在权限选择器中把任意会话切换到其它预设；该默认值只对之后新建的会话生效。预设键特意叫 `auto-mode`：Claude 风格皮肤固定的四段控件会把 **Auto** 映射到 `auto-mode`（优先于 `auto`），所以点 Auto 就会走本审查器，而不会走内置的每次调用都审查的 auto 审查器，既不用加第五个按钮，也不必改皮肤源码。
 
-仍停留在内置 `auto` 预设的会话会在 agent 出现时自动迁移到 `auto-review`。内置插件会被保留，保证旧会话恢复不报错。
+仍停留在内置 `auto` 预设（或早期 `auto-review` 键）的会话会在 agent 出现时自动迁移到 `auto-mode`。内置插件会被保留，保证旧会话恢复不报错。
 
 ## 配置
 
@@ -95,7 +95,7 @@ pnpm add github:EricStoneChina/better-auto-review
     model: codex/gpt-6.2-sol
     reasoningEffort: medium
     maxTokens: 600
-    preset: auto-review
+    preset: auto-mode
     baselineSandbox: workspace-write
     maxConsecutiveDenials: 3
     onError: deny
@@ -107,7 +107,7 @@ pnpm add github:EricStoneChina/better-auto-review
 | `model` | `codex/gpt-6.2-sol` | 审查模型 |
 | `reasoningEffort` | `medium` | 可选推理强度；留空用适配器默认 |
 | `maxTokens` | `600` | 审查输出上限 |
-| `preset` | `auto-review` | 本插件生效的权限预设 |
+| `preset` | `auto-mode` | 本插件生效的权限预设 |
 | `baselineSandbox` | `workspace-write` | 不高于此等级的请求不审查 |
 | `maxConsecutiveDenials` | `3` | 连续拒绝多少次后转人工 |
 | `onError` | `deny` | 审查异常时 `deny`（fail closed）或 `ask` |
@@ -118,9 +118,11 @@ pnpm add github:EricStoneChina/better-auto-review
 
 - 当前工作目录；
 - 基线与请求的沙箱模式；
-- 最近 2 条真实用户消息（视为可信意图）；
+- 最近 6 条真实用户消息（视为可信意图）；
 - 最近 8 次工具调用的名称与截断参数；
 - 本次待执行调用的完整名称与参数（含 `justification`）。
+
+审查模型被指示：允许日常开发工作以及本地诊断、修复（包括修复工作区的文件权限），只拒绝明确的高风险操作。宽泛的“继续”“修好它”或“总失败”的抱怨，足以授权可逆的本地修复；每次拒绝都必须给出具体理由。
 
 工具名、参数及其中的任何文本都按**不可信数据**处理，只有用户消息被视为授权来源。审查模型必须输出严格 JSON：
 
