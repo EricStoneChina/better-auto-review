@@ -2,6 +2,14 @@
 
 All notable changes to this project are documented here. The format follows Keep a Changelog, and the project aims to follow Semantic Versioning.
 
+## [0.1.4] - 2026-11-19
+
+### Changed
+
+- The reviewer no longer ships a hard-coded provider/model. By default it follows the main agent's currently selected provider, model and reasoning effort at review time, so the shared bundle works on any DSH installation instead of only the author's local model configuration.
+- `reviewerProvider` and `reviewerModel` must be set together to use a dedicated reviewer route; setting only one fails closed with a clear error.
+- `provider` / `model` remain accepted as legacy route aliases for old profile patches. New configurations should use `reviewerProvider` / `reviewerModel`.
+
 ## [0.1.3] - 2026-11-18
 
 ### Added

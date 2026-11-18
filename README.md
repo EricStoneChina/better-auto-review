@@ -24,7 +24,7 @@ Better Auto Review takes the Codex approach:
 | Approval lifetime | whole session | one call (`allowed-once`) |
 | Workspace `read`/`write` | one reviewer call each | **zero reviewer calls** |
 | Denial message | generic | reviewer's reason included |
-| Reviewer model | fixed to the session model | configurable, independent route |
+| Reviewer model | fixed to the session model | same as the main model by default; optional dedicated route |
 | Reviewer error | implementation-defined | **fail closed** by default |
 
 ## How "escalation" is detected
@@ -55,7 +55,7 @@ Then add the bundle to the profile's `package.json`:
 ```json
 {
   "dependencies": {
-    "@ericstonechina/better-auto-review": "^0.1.3"
+    "@ericstonechina/better-auto-review": "^0.1.4"
   },
   "dsh": {
     "profile": {
@@ -91,11 +91,12 @@ Defaults live in the bundle's [cordis.patch.yml](cordis.patch.yml). Override the
 ```yaml
 - id: better-auto-review
   config:
-    provider: magpie-responses
-    model: codex/gpt-6.2-sol
-    reviewerProvider: magpie-responses
-    reviewerModel: codex/gpt-6.2-sol
-    reviewerReasoningEffort: low
+    # By default the reviewer uses the main agent's selected provider and model,
+    # so this shared bundle never pins a model that only one machine has.
+    # For a dedicated reviewer route, set BOTH keys together:
+    # reviewerProvider: your-provider
+    # reviewerModel: your-model
+    # reviewerReasoningEffort: low
     reviewerTimeoutMs: 60000
     maxTokens: 800
     reviewerSubagent: true
@@ -120,10 +121,10 @@ Defaults live in the bundle's [cordis.patch.yml](cordis.patch.yml). Override the
 
 | Key | Default | Meaning |
 | --- | --- | --- |
-| `provider` / `model` | `magpie-responses` / `codex/gpt-6.2-sol` | Backward-compatible route used when no reviewer route is set |
-| `reviewerProvider` | value of `provider` | LLM route dedicated to review calls |
-| `reviewerModel` | value of `model` | Reviewer model; keep it separate from the main coding model if possible |
-| `reviewerReasoningEffort` | `low` | Reasoning effort for the reviewer; low keeps reviews fast and cheap |
+| `provider` / `model` | unset | Legacy route aliases kept for old profile patches; prefer `reviewerProvider` / `reviewerModel` |
+| `reviewerProvider` | main agent's provider | LLM route for review calls; set together with `reviewerModel` to override |
+| `reviewerModel` | main agent's model | Reviewer model; defaults to the main model so the bundle is portable |
+| `reviewerReasoningEffort` | main agent's effort | Reasoning effort for the reviewer; set `low` for faster, cheaper reviews |
 | `reviewerTimeoutMs` | `60000` | Hard timeout for one review; timeout fails closed |
 | `maxTokens` | `800` | Reviewer output cap |
 | `reviewerSubagent` | `true` | Run each review as a read-only child agent that can inspect the workspace |
@@ -142,7 +143,7 @@ Defaults live in the bundle's [cordis.patch.yml](cordis.patch.yml). Override the
 | `verdictCacheMaxEntries` | `128` | Cache size cap |
 | `onError` | `deny` | `deny` (fail closed) or `ask` on reviewer failure |
 
-The reviewer can be any route your DSH LLM configuration exposes. It does not have to be the model used by the main session.
+By default the reviewer follows the main agent's selected provider, model and reasoning effort at review time. The shared bundle therefore works on any DSH installation without a hard-coded model. To use a separate reviewer route, set **both** `reviewerProvider` and `reviewerModel` (setting only one is an error).
 
 ## What the reviewer sees
 

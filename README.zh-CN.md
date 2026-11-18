@@ -24,7 +24,7 @@ Better Auto Review 采用 Codex 的思路：
 | 放行范围 | 整个会话 | 单次调用（`allowed-once`） |
 | 工作区内 read/write | 每次一次模型调用 | **0 次模型调用** |
 | 拒绝提示 | 通用文案 | 附带审查模型给出的原因 |
-| 审查模型 | 固定复用主会话模型 | 可配置为独立路由 |
+| 审查模型 | 固定复用主会话模型 | 默认与主模型相同；可选独立路由 |
 | 审查异常 | 视实现而定 | **默认 fail closed** |
 
 ## 如何判定“提权”
@@ -55,7 +55,7 @@ pnpm add @ericstonechina/better-auto-review
 ```json
 {
   "dependencies": {
-    "@ericstonechina/better-auto-review": "^0.1.3"
+    "@ericstonechina/better-auto-review": "^0.1.4"
   },
   "dsh": {
     "profile": {
@@ -91,11 +91,11 @@ bundle 会把 **Better Auto Review** 设为新会话的默认预设（通过在 
 ```yaml
 - id: better-auto-review
   config:
-    provider: magpie-responses
-    model: codex/gpt-6.2-sol
-    reviewerProvider: magpie-responses
-    reviewerModel: codex/gpt-6.2-sol
-    reviewerReasoningEffort: low
+    # 默认跟随主代理当前选择的 provider 和模型，因此共享 bundle 不会固定某个
+    # 只存在于作者电脑上的模型。若要使用独立审查路由，必须同时设置下面两项：
+    # reviewerProvider: your-provider
+    # reviewerModel: your-model
+    # reviewerReasoningEffort: low
     reviewerTimeoutMs: 60000
     maxTokens: 800
     reviewerSubagent: true
@@ -120,10 +120,10 @@ bundle 会把 **Better Auto Review** 设为新会话的默认预设（通过在 
 
 | 键 | 默认 | 说明 |
 | --- | --- | --- |
-| `provider` / `model` | `magpie-responses` / `codex/gpt-6.2-sol` | 兼容旧配置的默认路由，在未设置专用审查路由时使用 |
-| `reviewerProvider` | 同 `provider` | 审查专用的 LLM 路由 |
-| `reviewerModel` | 同 `model` | 审查模型；建议与主编码模型分开 |
-| `reviewerReasoningEffort` | `low` | 审查推理强度；低强度更快更省 |
+| `provider` / `model` | 未设置 | 兼容旧 profile 的路由别名；新配置请用 `reviewerProvider` / `reviewerModel` |
+| `reviewerProvider` | 主代理的 provider | 审查调用的 LLM 路由；与 `reviewerModel` 成对设置才会覆盖 |
+| `reviewerModel` | 主代理的 model | 审查模型；默认与主模型一致，保证 bundle 可移植 |
+| `reviewerReasoningEffort` | 主代理的推理强度 | 审查推理强度；设为 `low` 可更快更省 |
 | `reviewerTimeoutMs` | `60000` | 单次审查硬超时；超时按失败处理 |
 | `maxTokens` | `800` | 审查输出上限 |
 | `reviewerSubagent` | `true` | 每次审查作为一个只读子代理运行，可自行查看工作区 |
@@ -142,7 +142,7 @@ bundle 会把 **Better Auto Review** 设为新会话的默认预设（通过在 
 | `verdictCacheMaxEntries` | `128` | 缓存条数上限 |
 | `onError` | `deny` | 审查异常时 `deny`（fail closed）或 `ask` |
 
-审查模型可以是你的 DSH LLM 配置中的任意路由，不必与主会话模型相同。
+默认情况下，审查器在每次审查时跟随主代理当前选择的 provider、模型和推理强度，所以共享 bundle 不需要硬编码任何模型，能在任意 DSH 安装上工作。若要使用单独的审查路由，必须**同时**设置 `reviewerProvider` 和 `reviewerModel`（只设置其中一个会报错）。
 
 ## 审查输入
 

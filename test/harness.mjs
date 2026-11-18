@@ -71,9 +71,15 @@ function makeSession(events = USER_EVENTS, preset = 'auto-mode') {
   return { id: 's1', preset, snapshotEvents: () => events }
 }
 
-function makeExec(session, args, callId = 'call-1') {
+const MAIN_ROUTE = { provider: 'main-provider', model: 'main-model', reasoningEffort: 'medium' }
+
+function makeExec(session, args, callId = 'call-1', route = MAIN_ROUTE) {
   return {
-    agent: { session },
+    agent: {
+      session,
+      model: { current: () => route },
+      options: route,
+    },
     name: 'write',
     arguments: args,
     callId,
@@ -84,7 +90,7 @@ function makeExec(session, args, callId = 'call-1') {
 
 function setup(reviewText, config = {}, session = makeSession(), streamFactory, subagents) {
   const ctx = makeCtx(session, reviewText, streamFactory, subagents)
-  apply(ctx, { provider: 'magpie-responses', model: 'codex/gpt-6.2-sol', reasoningEffort: 'medium', ...config })
+  apply(ctx, config)
   return {
     ctx,
     session,
@@ -243,6 +249,37 @@ test('uses the dedicated reviewer route and reasoning effort', async () => {
   assert.equal(options.reasoningEffort, 'low')
 })
 
+test('defaults the reviewer route to the main agent model', async () => {
+  const { pre, ctx } = setup('{"decision":"allow","riskLevel":"low"}')
+  await pre(makeExec(makeSession(), ESCALATION_ARGS), allowNext)
+  const options = ctx.log.find((entry) => entry[0] === 'llm')[3]
+  assert.equal(options.provider, 'main-provider')
+  assert.equal(options.model, 'main-model')
+  assert.equal(options.reasoningEffort, 'medium')
+})
+
+test('falls back to agent options before the session records a model selection', async () => {
+  const { pre, ctx } = setup('{"decision":"allow","riskLevel":"low"}')
+  const exec = makeExec(makeSession(), ESCALATION_ARGS)
+  exec.agent = {
+    session: exec.agent.session,
+    options: { provider: 'option-provider', model: 'option-model', reasoningEffort: 'high' },
+  }
+  await pre(exec, allowNext)
+  const options = ctx.log.find((entry) => entry[0] === 'llm')[3]
+  assert.equal(options.provider, 'option-provider')
+  assert.equal(options.model, 'option-model')
+  assert.equal(options.reasoningEffort, 'high')
+})
+
+test('fails closed when only half of a dedicated reviewer route is configured', async () => {
+  const { pre } = setup('{"decision":"allow","riskLevel":"low"}', { reviewerProvider: 'reviewer-provider' })
+  const decision = await pre(makeExec(makeSession(), ESCALATION_ARGS), allowNext)
+  assert.equal(decision.kind, 'deny')
+  assert.equal(decision.info.code, 'AUTO_REVIEW_FAILED')
+  assert.match(decision.reason, /reviewerProvider and reviewerModel must be set together/)
+})
+
 test('serves repeated identical escalations from the verdict cache', async () => {
   const { pre, llmCalls } = setup('{"decision":"allow","riskLevel":"low"}', { verdictCacheTtlMs: 60000 })
   const session = makeSession()
@@ -330,8 +367,8 @@ test('uses a read-only reviewer subagent and its structured verdict', async () =
   assert.equal(spec.delivery, 'caller')
   assert.equal(spec.request.agentPreset, 'better-auto-review-readonly')
   assert.equal(spec.request.outputSchema.properties.decision.enum[0], 'allow')
-  assert.equal(spec.request.agentOptions.provider, 'magpie-responses')
-  assert.equal(spec.request.agentOptions.model, 'codex/gpt-6.2-sol')
+  assert.equal(spec.request.agentOptions.provider, 'main-provider')
+  assert.equal(spec.request.agentOptions.model, 'main-model')
   assert.equal(spec.request.agentOptions.reasoningEffort, 'low')
   assert.equal(spec.request.maxDepth, 1)
   const promptText = spec.request.prompt[0].text

@@ -1,6 +1,6 @@
 {
   "name": "@ericstonechina/better-auto-review",
-  "version": "0.1.3",
+  "version": "0.1.4",
   "description": "Better Auto Review for DeepSeek Harness: Codex-style sandbox escalation review. Keep the workspace-write sandbox and review only privilege escalations, answering allow-once or deny with a configurable reviewer model.",
   "keywords": [
     "dsh",

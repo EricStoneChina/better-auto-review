@@ -71,14 +71,14 @@
     - id: better-auto-review
       name: '@ericstonechina/better-auto-review'
       config:
-        provider: magpie-responses
-        model: codex/gpt-6.2-sol
-        # Review with a dedicated low-effort route and a hard time budget. These
-        # defaults prevent one broken sandbox from consuming the main model's
-        # quota through repeated reviews.
-        reviewerProvider: magpie-responses
-        reviewerModel: codex/gpt-6.2-sol
-        reviewerReasoningEffort: low
+        # No provider/model is pinned here. The reviewer follows the main
+        # agent's currently selected model, so this bundle works on any DSH
+        # installation instead of only the author's local model setup.
+        #
+        # To use a dedicated reviewer route, set BOTH keys:
+        #   reviewerProvider: your-provider
+        #   reviewerModel: your-model
+        #   reviewerReasoningEffort: low
         reviewerTimeoutMs: 60000
         maxTokens: 800
         # The reviewer runs as a read-only child agent by default. Its whitelist
