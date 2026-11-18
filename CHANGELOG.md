@@ -2,6 +2,19 @@
 
 All notable changes to this project are documented here. The format follows Keep a Changelog, and the project aims to follow Semantic Versioning.
 
+## [0.1.2] - 2026-11-18
+
+### Added
+
+- P0 safety and cost controls for the reviewer: `reviewerProvider`, `reviewerModel`, `reviewerReasoningEffort` (default `low`), `reviewerTimeoutMs`, `maxReviewsPerTurn`, `maxFailuresPerTurn`, a sliding denial circuit (`denialWindowSize` / `maxWindowDenials`), and a short-lived fingerprint verdict cache (`verdictCacheTtlMs` / `verdictCacheMaxEntries`). These prevent a repeated Windows sandbox failure from consuming unlimited reviewer quota.
+- Structured reviewer verdicts: `{decision, reason, riskLevel}`. `high` is always denied, `medium` requires a specific authorising user request, and `low` is allowed.
+- Deterministic hard-deny rules for disk/filesystem destruction, recursive deletion of a drive root or home directory, secret exfiltration to a network destination, and credential dumping/security-control tampering.
+- Tests for hard denials, medium-risk authorization, dedicated reviewer route, verdict cache, per-turn review budget, and reviewer timeout.
+
+### Changed
+
+- Default reviewer output cap is `800` tokens and the default reviewer reasoning effort is `low`, independent of the main coding model.
+
 ## [0.1.1] - 2026-11-18
 
 ### Changed

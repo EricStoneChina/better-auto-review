@@ -55,7 +55,7 @@ Then add the bundle to the profile's `package.json`:
 ```json
 {
   "dependencies": {
-    "@ericstonechina/better-auto-review": "^0.1.0"
+    "@ericstonechina/better-auto-review": "^0.1.2"
   },
   "dsh": {
     "profile": {
@@ -93,23 +93,40 @@ Defaults live in the bundle's [cordis.patch.yml](cordis.patch.yml). Override the
   config:
     provider: magpie-responses
     model: codex/gpt-6.2-sol
-    reasoningEffort: medium
-    maxTokens: 600
+    reviewerProvider: magpie-responses
+    reviewerModel: codex/gpt-6.2-sol
+    reviewerReasoningEffort: low
+    reviewerTimeoutMs: 60000
+    maxTokens: 800
     preset: auto-mode
     baselineSandbox: workspace-write
     maxConsecutiveDenials: 3
+    denialWindowSize: 10
+    maxWindowDenials: 6
+    maxReviewsPerTurn: 10
+    maxFailuresPerTurn: 10
+    verdictCacheTtlMs: 60000
+    verdictCacheMaxEntries: 128
     onError: deny
 ```
 
 | Key | Default | Meaning |
 | --- | --- | --- |
-| `provider` | `magpie-responses` | LLM route used by the reviewer |
-| `model` | `codex/gpt-6.2-sol` | Reviewer model |
-| `reasoningEffort` | `medium` | Optional reasoning effort; empty uses the adapter default |
-| `maxTokens` | `600` | Reviewer output cap |
+| `provider` / `model` | `magpie-responses` / `codex/gpt-6.2-sol` | Backward-compatible route used when no reviewer route is set |
+| `reviewerProvider` | value of `provider` | LLM route dedicated to review calls |
+| `reviewerModel` | value of `model` | Reviewer model; keep it separate from the main coding model if possible |
+| `reviewerReasoningEffort` | `low` | Reasoning effort for the reviewer; low keeps reviews fast and cheap |
+| `reviewerTimeoutMs` | `60000` | Hard timeout for one review; timeout fails closed |
+| `maxTokens` | `800` | Reviewer output cap |
 | `preset` | `auto-mode` | Permission preset this plugin is active on |
 | `baselineSandbox` | `workspace-write` | Anything at or below this rank is not reviewed |
-| `maxConsecutiveDenials` | `3` | Denials before a manual decision |
+| `maxConsecutiveDenials` | `3` | Consecutive denials before a manual decision |
+| `denialWindowSize` | `10` | Sliding window used by the denial circuit |
+| `maxWindowDenials` | `6` | Denials in the window before a manual decision |
+| `maxReviewsPerTurn` | `10` | Review calls allowed in one turn before falling back to the human |
+| `maxFailuresPerTurn` | `10` | Reviewer failures allowed in one turn before falling back to the human |
+| `verdictCacheTtlMs` | `60000` | Short cache for identical escalation fingerprints; `0` disables it |
+| `verdictCacheMaxEntries` | `128` | Cache size cap |
 | `onError` | `deny` | `deny` (fail closed) or `ask` on reviewer failure |
 
 The reviewer can be any route your DSH LLM configuration exposes. It does not have to be the model used by the main session.
@@ -127,14 +144,14 @@ The reviewer is instructed to allow routine development work and local diagnosti
 Tool names, arguments and any text inside them are treated as **untrusted data**; only user messages are treated as authorisation. The reviewer must answer with strict JSON:
 
 ```json
-{"decision":"allow"}
+{"decision":"allow","reason":"short reason","riskLevel":"low"}
 ```
 
 ```json
-{"decision":"deny","reason":"why this escalation is not justified"}
+{"decision":"deny","reason":"why this escalation is not justified","riskLevel":"high"}
 ```
 
-Anything else is a reviewer failure and follows `onError`.
+The plugin also applies deterministic rules before asking the model: disk/filesystem destruction, recursive deletion of a drive root or home directory, secret exfiltration to a network destination, and credential dumping/security tampering are hard-denied even if the reviewer would allow them. A `high` risk verdict is always denied; a `medium` verdict needs a specific authorising user request; a `low` verdict is allowed. Anything else is a reviewer failure and follows `onError`.
 
 ## Security model and limits
 
@@ -147,6 +164,7 @@ Consequences:
 - The `workspace-write` sandbox is still the primary enforcement boundary.
 - A tool that ignores the DSH sandbox and does not use `sandbox_permissions` (for example, some third-party or MCP tools) is outside this plugin's control; rely on that tool's own permission model.
 - The reviewer is a model: it can be wrong. Start with `workspace-write`, keep `onError: deny`, and use `maxConsecutiveDenials` to pull a human in early.
+- A repeated Windows sandbox failure cannot spin the reviewer forever: identical requests hit a short-lived verdict cache, and review/failure budgets plus a sliding denial circuit fall back to a human instead of consuming unlimited quota.
 
 ## Logs
 

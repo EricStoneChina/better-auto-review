@@ -21,7 +21,7 @@ const USER_EVENTS = [
   { type: 'tool/call', data: { name: 'read', arguments: '{"path":"C:/ws/a.txt"}' } },
 ]
 
-function makeCtx(session, reviewText) {
+function makeCtx(session, reviewText, streamFactory) {
   const handlers = new Map()
   const log = []
   const ctx = {
@@ -42,11 +42,13 @@ function makeCtx(session, reviewText) {
     sessions: {},
     tools: {},
     llm: {
-      stream: (options) => (async function* () {
-        log.push(['llm', options.provider, options.model, options])
-        yield { type: 'text-delta', index: 0, text: reviewText }
-        yield { type: 'finish', reason: { kind: 'stop' } }
-      })(),
+      stream: streamFactory
+        ? (options) => streamFactory(options, log)
+        : (options) => (async function* () {
+            log.push(['llm', options.provider, options.model, options])
+            yield { type: 'text-delta', index: 0, text: reviewText }
+            yield { type: 'finish', reason: { kind: 'stop' } }
+          })(),
     },
     on: (name, fn) => {
       handlers.set(name, fn)
@@ -79,8 +81,8 @@ function makeExec(session, args, callId = 'call-1') {
   }
 }
 
-function setup(reviewText, config = {}, session = makeSession()) {
-  const ctx = makeCtx(session, reviewText)
+function setup(reviewText, config = {}, session = makeSession(), streamFactory) {
+  const ctx = makeCtx(session, reviewText, streamFactory)
   apply(ctx, { provider: 'magpie-responses', model: 'codex/gpt-6.2-sol', reasoningEffort: 'medium', ...config })
   return {
     ctx,
@@ -193,6 +195,85 @@ test('hands the third consecutive denial to the human', async () => {
   assert.equal(first.kind, 'deny')
   assert.equal(second.kind, 'deny')
   assert.equal(third.kind, 'ask')
+})
+
+test('hard-denies disk destruction before calling the reviewer', async () => {
+  const { pre, llmCalls } = setup('{"decision":"allow"}')
+  const exec = makeExec(makeSession(), {
+    command: 'Remove-Item -Recurse -Force C:\\',
+    sandbox_permissions: 'danger-full-access',
+    justification: 'clean up',
+  })
+  const decision = await pre(exec, allowNext)
+  assert.equal(decision.kind, 'deny')
+  assert.equal(decision.info.code, 'AUTO_REVIEW_HARD_DENY')
+  assert.equal(llmCalls(), 0)
+})
+
+test('denies a medium-risk escalation without an explicit user request', async () => {
+  const session = makeSession([
+    { type: 'user/message', data: { source: { kind: 'user' }, content: [{ type: 'text', text: 'Check the build output.' }] } },
+  ])
+  const { pre } = setup('{"decision":"allow","riskLevel":"medium","reason":"outside workspace"}', {}, session)
+  const decision = await pre(makeExec(session, ESCALATION_ARGS, 'c1'), allowNext)
+  assert.equal(decision.kind, 'deny')
+  assert.match(decision.reason, /medium-risk|outside workspace/)
+})
+
+test('allows a medium-risk escalation when the user asked for that exact effect', async () => {
+  const session = makeSession([
+    { type: 'user/message', data: { source: { kind: 'user' }, content: [{ type: 'text', text: 'Please write the report outside the workspace.' }] } },
+  ])
+  const { pre } = setup('{"decision":"allow","riskLevel":"medium","reason":"requested outside write"}', {}, session)
+  assert.deepEqual(await pre(makeExec(session, ESCALATION_ARGS, 'c1'), allowNext), { kind: 'allow' })
+})
+
+test('uses the dedicated reviewer route and reasoning effort', async () => {
+  const { pre, ctx } = setup('{"decision":"allow","riskLevel":"low"}', {
+    reviewerProvider: 'reviewer-provider',
+    reviewerModel: 'reviewer-model',
+    reviewerReasoningEffort: 'low',
+  })
+  await pre(makeExec(makeSession(), ESCALATION_ARGS), allowNext)
+  const options = ctx.log.find((entry) => entry[0] === 'llm')[3]
+  assert.equal(options.provider, 'reviewer-provider')
+  assert.equal(options.model, 'reviewer-model')
+  assert.equal(options.reasoningEffort, 'low')
+})
+
+test('serves repeated identical escalations from the verdict cache', async () => {
+  const { pre, llmCalls } = setup('{"decision":"allow","riskLevel":"low"}', { verdictCacheTtlMs: 60000 })
+  const session = makeSession()
+  assert.deepEqual(await pre(makeExec(session, { ...ESCALATION_ARGS }, 'c1'), allowNext), { kind: 'allow' })
+  assert.deepEqual(await pre(makeExec(session, { ...ESCALATION_ARGS }, 'c2'), allowNext), { kind: 'allow' })
+  assert.equal(llmCalls(), 1)
+})
+
+test('hands the turn to the human after maxReviewsPerTurn', async () => {
+  const { pre, llmCalls } = setup('{"decision":"allow","riskLevel":"low"}', {
+    verdictCacheTtlMs: 0,
+    maxReviewsPerTurn: 1,
+  })
+  const session = makeSession()
+  assert.deepEqual(await pre(makeExec(session, { ...ESCALATION_ARGS }, 'c1'), allowNext), { kind: 'allow' })
+  assert.equal((await pre(makeExec(session, { ...ESCALATION_ARGS, path: 'C:/outside/y.txt' }, 'c2'), allowNext)).kind, 'ask')
+  assert.equal(llmCalls(), 1)
+})
+
+test('fails closed when the reviewer times out', async () => {
+  const { pre } = setup('', { reviewerTimeoutMs: 20 }, makeSession(), (options) => (async function* () {
+    // Keep a referenced timer alive; AbortSignal.timeout alone may be unref'd.
+    await new Promise((resolve) => {
+      const timer = setTimeout(resolve, 500)
+      options.signal?.addEventListener('abort', () => {
+        clearTimeout(timer)
+        resolve()
+      }, { once: true })
+    })
+  })())
+  const decision = await pre(makeExec(makeSession(), ESCALATION_ARGS), allowNext)
+  assert.equal(decision.kind, 'deny')
+  assert.equal(decision.info.code, 'AUTO_REVIEW_FAILED')
 })
 
 test('ignores sessions that are not on the auto-mode preset', async () => {

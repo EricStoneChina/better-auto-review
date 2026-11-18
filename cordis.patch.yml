@@ -44,9 +44,21 @@
       config:
         provider: magpie-responses
         model: codex/gpt-6.2-sol
-        reasoningEffort: medium
-        maxTokens: 600
+        # Review with a dedicated low-effort route and a hard time budget. These
+        # defaults prevent one broken sandbox from consuming the main model's
+        # quota through repeated reviews.
+        reviewerProvider: magpie-responses
+        reviewerModel: codex/gpt-6.2-sol
+        reviewerReasoningEffort: low
+        reviewerTimeoutMs: 60000
+        maxTokens: 800
         preset: auto-mode
         baselineSandbox: workspace-write
         maxConsecutiveDenials: 3
+        denialWindowSize: 10
+        maxWindowDenials: 6
+        maxReviewsPerTurn: 10
+        maxFailuresPerTurn: 10
+        verdictCacheTtlMs: 60000
+        verdictCacheMaxEntries: 128
         onError: deny

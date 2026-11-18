@@ -55,7 +55,7 @@ pnpm add @ericstonechina/better-auto-review
 ```json
 {
   "dependencies": {
-    "@ericstonechina/better-auto-review": "^0.1.0"
+    "@ericstonechina/better-auto-review": "^0.1.2"
   },
   "dsh": {
     "profile": {
@@ -93,23 +93,40 @@ bundle 会把 **Better Auto Review** 设为新会话的默认预设（通过在 
   config:
     provider: magpie-responses
     model: codex/gpt-6.2-sol
-    reasoningEffort: medium
-    maxTokens: 600
+    reviewerProvider: magpie-responses
+    reviewerModel: codex/gpt-6.2-sol
+    reviewerReasoningEffort: low
+    reviewerTimeoutMs: 60000
+    maxTokens: 800
     preset: auto-mode
     baselineSandbox: workspace-write
     maxConsecutiveDenials: 3
+    denialWindowSize: 10
+    maxWindowDenials: 6
+    maxReviewsPerTurn: 10
+    maxFailuresPerTurn: 10
+    verdictCacheTtlMs: 60000
+    verdictCacheMaxEntries: 128
     onError: deny
 ```
 
 | 键 | 默认 | 说明 |
 | --- | --- | --- |
-| `provider` | `magpie-responses` | 审查模型使用的 LLM 路由 |
-| `model` | `codex/gpt-6.2-sol` | 审查模型 |
-| `reasoningEffort` | `medium` | 可选推理强度；留空用适配器默认 |
-| `maxTokens` | `600` | 审查输出上限 |
+| `provider` / `model` | `magpie-responses` / `codex/gpt-6.2-sol` | 兼容旧配置的默认路由，在未设置专用审查路由时使用 |
+| `reviewerProvider` | 同 `provider` | 审查专用的 LLM 路由 |
+| `reviewerModel` | 同 `model` | 审查模型；建议与主编码模型分开 |
+| `reviewerReasoningEffort` | `low` | 审查推理强度；低强度更快更省 |
+| `reviewerTimeoutMs` | `60000` | 单次审查硬超时；超时按失败处理 |
+| `maxTokens` | `800` | 审查输出上限 |
 | `preset` | `auto-mode` | 本插件生效的权限预设 |
 | `baselineSandbox` | `workspace-write` | 不高于此等级的请求不审查 |
 | `maxConsecutiveDenials` | `3` | 连续拒绝多少次后转人工 |
+| `denialWindowSize` | `10` | 拒绝熔断的滑动窗口大小 |
+| `maxWindowDenials` | `6` | 窗口内拒绝多少次后转人工 |
+| `maxReviewsPerTurn` | `10` | 单轮最多审查次数，超出转人工 |
+| `maxFailuresPerTurn` | `10` | 单轮最多审查失败次数，超出转人工 |
+| `verdictCacheTtlMs` | `60000` | 相同提权指纹的短时缓存；`0` 关闭 |
+| `verdictCacheMaxEntries` | `128` | 缓存条数上限 |
 | `onError` | `deny` | 审查异常时 `deny`（fail closed）或 `ask` |
 
 审查模型可以是你的 DSH LLM 配置中的任意路由，不必与主会话模型相同。
@@ -127,14 +144,14 @@ bundle 会把 **Better Auto Review** 设为新会话的默认预设（通过在 
 工具名、参数及其中的任何文本都按**不可信数据**处理，只有用户消息被视为授权来源。审查模型必须输出严格 JSON：
 
 ```json
-{"decision":"allow"}
+{"decision":"allow","reason":"简短理由","riskLevel":"low"}
 ```
 
 ```json
-{"decision":"deny","reason":"这次提权不被允许的原因"}
+{"decision":"deny","reason":"这次提权不被允许的原因","riskLevel":"high"}
 ```
 
-其它输出都算审查失败，按 `onError` 处理。
+插件还会在询问模型前执行确定性规则：磁盘/文件系统破坏、递归删除盘符根目录或用户主目录、向网络目的地外传密钥、凭据窃取或安全控制篡改，都会被硬拒绝，即使审查模型想放行。`high` 风险一律拒绝；`medium` 风险必须有用户对具体目标的明确授权；`low` 才放行。其它输出都算审查失败，按 `onError` 处理。
 
 ## 安全模型与边界
 
@@ -147,6 +164,7 @@ Better Auto Review 是**提权审查器**，不是沙箱的替代品。它的保
 - `workspace-write` 沙箱仍是主要防线；
 - 完全无视 DSH 沙箱、也不使用 `sandbox_permissions` 的第三方/MCP 工具不在本插件控制范围内，应由其自身权限机制约束；
 - 审查模型也会犯错：建议从 `workspace-write` 起步、保持 `onError: deny`，并用 `maxConsecutiveDenials` 尽早转人工。
+- 反复出现的 Windows 沙箱失败不会无限消耗审查额度：相同请求会命中短时判决缓存，单轮审查/失败预算和滑动拒绝熔断会把决定转给用户。
 
 ## 日志
 
