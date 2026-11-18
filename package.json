@@ -1,0 +1,53 @@
+{
+  "name": "@ericstonechina/better-auto-review",
+  "version": "0.1.0",
+  "description": "Better Auto Review for DeepSeek Harness: Codex-style sandbox escalation review. Keep the workspace-write sandbox and review only privilege escalations, answering allow-once or deny with a configurable reviewer model.",
+  "keywords": [
+    "dsh",
+    "deepseek-harness",
+    "auto-review",
+    "sandbox",
+    "security",
+    "agent",
+    "codex"
+  ],
+  "homepage": "https://github.com/EricStoneChina/better-auto-review#readme",
+  "bugs": {
+    "url": "https://github.com/EricStoneChina/better-auto-review/issues"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/EricStoneChina/better-auto-review.git"
+  },
+  "author": "EricStoneChina",
+  "license": "MIT",
+  "type": "module",
+  "main": "lib/index.js",
+  "exports": {
+    ".": "./lib/index.js"
+  },
+  "files": [
+    "cordis.patch.yml",
+    "lib",
+    "README.md",
+    "README.zh-CN.md",
+    "LICENSE",
+    "CHANGELOG.md"
+  ],
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "test": "node test/harness.mjs",
+    "check": "node --check lib/index.js && node --check test/harness.mjs"
+  },
+  "publishConfig": {
+    "access": "public",
+    "registry": "https://registry.npmjs.org/"
+  },
+  "dsh": {
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    }
+  }
+}

@@ -1,0 +1,173 @@
+# Better Auto Review
+
+**给 [DeepSeek Harness](https://github.com/deepseek-ai) 的 Codex 式自动审查：保留沙箱，只审提权。**
+
+[English](README.md) · [问题反馈](https://github.com/EricStoneChina/better-auto-review/issues) · [MIT 许可证](LICENSE)
+
+---
+
+DSH 自带的 Auto Review 会对**每一次工具调用**都询问审查模型，而一旦模型放行，整个会话就以 `danger-full-access` 运行。这只有在完全信任审查模型时才安全，而且连工作区内的 `read` 都要多一次模型往返。
+
+Better Auto Review 采用 Codex 的思路：
+
+- 会话始终留在 **`workspace-write` 沙箱**里；
+- **只有当某一次工具调用通过 `sandbox_permissions` 显式请求放宽沙箱**时，才询问审查模型；
+- 放行只覆盖**那一次调用**（`allowed-once`），不会变成整个会话的权限；
+- 拒绝时给出原因；连续拒绝则转人工。
+
+## 与内置版的区别
+
+| | 内置 Auto Review | Better Auto Review |
+| --- | --- | --- |
+| 审查范围 | 每次工具调用 | 仅显式沙箱提权 |
+| 基线沙箱 | `danger-full-access` | `workspace-write` |
+| 放行范围 | 整个会话 | 单次调用（`allowed-once`） |
+| 工作区内 read/write | 每次一次模型调用 | **0 次模型调用** |
+| 拒绝提示 | 通用文案 | 附带审查模型给出的原因 |
+| 审查模型 | 固定复用主会话模型 | 可配置为独立路由 |
+| 审查异常 | 视实现而定 | **默认 fail closed** |
+
+## 如何判定“提权”
+
+插件监听 `tools/pre-execute`，只有以下条件全部满足才进入审查：
+
+1. 调用属于某个 agent（`run_code` 内部的嵌套调用也算；最外层 `run_code` 包装跳过）；
+2. 会话的权限预设等于配置的预设（默认 `auto-review`）；
+3. 工具参数里含有字符串 `sandbox_permissions`；
+4. `rank(sandbox_permissions) > rank(baselineSandbox)`，等级为
+   `read-only = 0`、`workspace-write = 1`、`danger-full-access = 2`。
+
+默认 `baselineSandbox: workspace-write`，因此只有 `danger-full-access` 会触发审查；工作区内操作完全不调用模型。
+
+模型 **allow**：记住该调用 id，并对工具随后发起的一次性提权审批返回 `allowed-once`，只放这一次。模型 **deny**：在工具执行前拒绝，并把原因带回给模型。连续 `maxConsecutiveDenials` 次拒绝后转人工。审查出错默认拒绝（`onError: deny`），也可设为 `ask` 转人工。
+
+## 安装
+
+### 从 npm 安装（推荐）
+
+```bash
+# 在你的 DSH profile 目录，例如 ~/.dsh/profiles/desktop
+pnpm add @ericstonechina/better-auto-review
+```
+
+然后在 profile 的 `package.json` 中加入 bundle：
+
+```json
+{
+  "dependencies": {
+    "@ericstonechina/better-auto-review": "^0.1.0"
+  },
+  "dsh": {
+    "profile": {
+      "bundles": [
+        "@deepseek-ai/dsh-base",
+        "@ericstonechina/better-auto-review"
+      ]
+    }
+  }
+}
+```
+
+重启 DSH（或用插件管理器启用）。该 bundle 的 patch 会插入插件行，并新增 **Better Auto Review** 权限预设。
+
+### 从 GitHub 安装（预发布 / 开发版）
+
+```bash
+pnpm add github:EricStoneChina/better-auto-review
+```
+
+`dsh.profile.bundles` 中仍使用包名。
+
+### 启用
+
+在会话的权限选择器中选择 **Better Auto Review**。该预设为 `workspace-write` + `approval: ask`，普通工作区操作不受影响，只有提权请求会被拦截审查。
+
+仍停留在内置 `auto` 预设的会话会在 agent 出现时自动迁移到 `auto-review`。内置插件会被保留，保证旧会话恢复不报错。
+
+## 配置
+
+默认值在 bundle 的 [cordis.patch.yml](cordis.patch.yml)。可在 profile 的 `cordis.patch.yml` 中用同一个行 id 覆盖：
+
+```yaml
+- id: better-auto-review
+  config:
+    provider: magpie-responses
+    model: codex/gpt-6.2-sol
+    reasoningEffort: medium
+    maxTokens: 600
+    preset: auto-review
+    baselineSandbox: workspace-write
+    maxConsecutiveDenials: 3
+    onError: deny
+```
+
+| 键 | 默认 | 说明 |
+| --- | --- | --- |
+| `provider` | `magpie-responses` | 审查模型使用的 LLM 路由 |
+| `model` | `codex/gpt-6.2-sol` | 审查模型 |
+| `reasoningEffort` | `medium` | 可选推理强度；留空用适配器默认 |
+| `maxTokens` | `600` | 审查输出上限 |
+| `preset` | `auto-review` | 本插件生效的权限预设 |
+| `baselineSandbox` | `workspace-write` | 不高于此等级的请求不审查 |
+| `maxConsecutiveDenials` | `3` | 连续拒绝多少次后转人工 |
+| `onError` | `deny` | 审查异常时 `deny`（fail closed）或 `ask` |
+
+审查模型可以是你的 DSH LLM 配置中的任意路由，不必与主会话模型相同。
+
+## 审查输入
+
+- 当前工作目录；
+- 基线与请求的沙箱模式；
+- 最近 2 条真实用户消息（视为可信意图）；
+- 最近 8 次工具调用的名称与截断参数；
+- 本次待执行调用的完整名称与参数（含 `justification`）。
+
+工具名、参数及其中的任何文本都按**不可信数据**处理，只有用户消息被视为授权来源。审查模型必须输出严格 JSON：
+
+```json
+{"decision":"allow"}
+```
+
+```json
+{"decision":"deny","reason":"这次提权不被允许的原因"}
+```
+
+其它输出都算审查失败，按 `onError` 处理。
+
+## 安全模型与边界
+
+Better Auto Review 是**提权审查器**，不是沙箱的替代品。它的保证是：
+
+> 只有当工具调用显式请求比基线更宽的 `sandbox_permissions`，**并且**审查模型放行时，这次调用才会以更宽权限执行。
+
+因此：
+
+- `workspace-write` 沙箱仍是主要防线；
+- 完全无视 DSH 沙箱、也不使用 `sandbox_permissions` 的第三方/MCP 工具不在本插件控制范围内，应由其自身权限机制约束；
+- 审查模型也会犯错：建议从 `workspace-write` 起步、保持 `onError: deny`，并用 `maxConsecutiveDenials` 尽早转人工。
+
+## 日志
+
+所有日志带前缀 `better-auto-review:`，记录迁移、放行、拒绝与审查失败。
+
+## 开发
+
+```bash
+npm test        # 插件状态机的 node:test 测试
+npm run check   # 语法检查
+npm pack --dry-run
+```
+
+测试用桩替代 DSH 宿主（权限预设、LLM 流、工具流水线、审批监听），无需安装 DSH 即可运行。
+
+## 反馈
+
+这是早期公开测试版。请通过 [Issues](https://github.com/EricStoneChina/better-auto-review/issues) 反馈，并附上：
+
+- DSH 版本与操作系统；
+- 使用的预设和 `cordis.patch.yml` 配置；
+- 出问题前后的 `better-auto-review:` 日志。
+
+## 许可证
+
+MIT © 2026 EricStoneChina

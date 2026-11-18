@@ -1,0 +1,45 @@
+# Better Auto Review bundle patch
+#
+# Two loader operations:
+# 1. Override the core `permission` row to add an `auto-review` preset
+#    (workspace-write + ask). A patch replaces the row's whole config, so every
+#    built-in preset is restated here.
+# 2. Insert this bundle's own plugin row, wired to the reviewer route.
+
+- id: permission
+  name: '@deepseek-ai/dsh-permission-presets'
+  config:
+    presets:
+      read-only:
+        sandbox: read-only
+        approval: ask
+        name: read-only
+        description: Read-only sandbox; wider retries require approval.
+      workspace-write:
+        sandbox: workspace-write
+        approval: ask
+        name: workspace-write
+        description: Write inside the workspace and permitted temporary directories; wider retries require approval.
+      danger-full-access:
+        sandbox: danger-full-access
+        approval: never
+        name: danger-full-access
+        description: Full file access without approval prompts.
+      auto-review:
+        sandbox: workspace-write
+        approval: ask
+        name: Better Auto Review
+        description: Workspace-write sandbox; a reviewer model answers each request to escalate this one call to full access.
+
+- insert:
+    - id: better-auto-review
+      name: '@ericstonechina/better-auto-review'
+      config:
+        provider: magpie-responses
+        model: codex/gpt-6.2-sol
+        reasoningEffort: medium
+        maxTokens: 600
+        preset: auto-review
+        baselineSandbox: workspace-write
+        maxConsecutiveDenials: 3
+        onError: deny
