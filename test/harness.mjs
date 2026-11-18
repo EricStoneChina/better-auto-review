@@ -21,7 +21,7 @@ const USER_EVENTS = [
   { type: 'tool/call', data: { name: 'read', arguments: '{"path":"C:/ws/a.txt"}' } },
 ]
 
-function makeCtx(session, reviewText, streamFactory) {
+function makeCtx(session, reviewText, streamFactory, subagents) {
   const handlers = new Map()
   const log = []
   const ctx = {
@@ -41,6 +41,7 @@ function makeCtx(session, reviewText, streamFactory) {
     approval: {},
     sessions: {},
     tools: {},
+    ...(subagents === undefined ? {} : { subagents }),
     llm: {
       stream: streamFactory
         ? (options) => streamFactory(options, log)
@@ -81,14 +82,15 @@ function makeExec(session, args, callId = 'call-1') {
   }
 }
 
-function setup(reviewText, config = {}, session = makeSession(), streamFactory) {
-  const ctx = makeCtx(session, reviewText, streamFactory)
+function setup(reviewText, config = {}, session = makeSession(), streamFactory, subagents) {
+  const ctx = makeCtx(session, reviewText, streamFactory, subagents)
   apply(ctx, { provider: 'magpie-responses', model: 'codex/gpt-6.2-sol', reasoningEffort: 'medium', ...config })
   return {
     ctx,
     session,
     pre: ctx.handler('tools/pre-execute'),
     approve: ctx.handler('approval/request'),
+    guard: ctx.handler('agent/pre-step'),
     llmCalls: () => ctx.log.filter((x) => x[0] === 'llm').length,
   }
 }
@@ -294,4 +296,106 @@ test('migrates an earlier auto-review session to auto-mode', () => {
   const ctx = makeCtx(session, '{"decision":"allow"}')
   apply(ctx, {})
   assert.equal(session.preset, 'auto-mode')
+})
+
+test('uses a read-only reviewer subagent and its structured verdict', async () => {
+  let spec
+  const subagents = {
+    getProvider: (name) => (name === 'spawn' ? { name } : undefined),
+    startActivation: async (value) => {
+      spec = value
+      return {
+        childId: 'reviewer-1',
+        messageId: 'message-1',
+        result: Promise.resolve({
+          stopReason: 'completed',
+          structured: { decision: 'allow', reason: 'routine local development', riskLevel: 'low' },
+          output: [],
+        }),
+        dispose: async () => {},
+      }
+    },
+  }
+  const { pre, llmCalls } = setup(
+    '{"decision":"deny"}',
+    { verdictCacheTtlMs: 0, reviewerReasoningEffort: 'low' },
+    makeSession(),
+    undefined,
+    subagents,
+  )
+  const exec = makeExec(makeSession(), ESCALATION_ARGS)
+  assert.deepEqual(await pre(exec, allowNext), { kind: 'allow' })
+  assert.equal(llmCalls(), 0)
+  assert.equal(spec.provider, 'spawn')
+  assert.equal(spec.delivery, 'caller')
+  assert.equal(spec.request.agentPreset, 'better-auto-review-readonly')
+  assert.equal(spec.request.outputSchema.properties.decision.enum[0], 'allow')
+  assert.equal(spec.request.agentOptions.provider, 'magpie-responses')
+  assert.equal(spec.request.agentOptions.model, 'codex/gpt-6.2-sol')
+  assert.equal(spec.request.agentOptions.reasoningEffort, 'low')
+  assert.equal(spec.request.maxDepth, 1)
+  const promptText = spec.request.prompt[0].text
+  assert.match(promptText, /TRUSTED USER INTENT/)
+  assert.match(promptText, /structured_output/)
+})
+
+test('keeps reviewer children read-only and strips injected system context', async () => {
+  let spec
+  let resolveResult
+  const resultPromise = new Promise((resolve) => {
+    resolveResult = resolve
+  })
+  const subagents = {
+    getProvider: () => ({}),
+    startActivation: async (value) => {
+      spec = value
+      return { childId: 'reviewer-2', result: resultPromise, dispose: async () => {} }
+    },
+  }
+  const { pre, guard } = setup('{"decision":"deny"}', { verdictCacheTtlMs: 0 }, makeSession(), undefined, subagents)
+  const parentExec = makeExec(makeSession(), ESCALATION_ARGS)
+  const pending = pre(parentExec, allowNext)
+  await new Promise((resolve) => setImmediate(resolve))
+
+  const childSession = { id: 'reviewer-2', preset: 'better-auto-review-readonly', snapshotEvents: () => [] }
+  const childWrite = {
+    agent: { id: 'reviewer-2', session: childSession },
+    name: 'write',
+    arguments: { path: 'C:/ws/x', content: 'x' },
+    callId: 'child-call',
+    rootCallId: 'child-call',
+    signal: new AbortController().signal,
+  }
+  const denied = await pre(childWrite, allowNext)
+  assert.equal(denied.kind, 'deny')
+  assert.equal(denied.info.code, 'AUTO_REVIEW_READ_ONLY')
+  const childRead = { ...childWrite, name: 'read', arguments: { path: 'C:/ws/a.txt' } }
+  assert.deepEqual(await pre(childRead, allowNext), { kind: 'allow' })
+
+  const promptText = spec.request.prompt[0].text
+  const decision = await guard(
+    {
+      agent: { id: 'reviewer-2', session: childSession },
+      messages: [{ source: { kind: 'user' }, content: [{ type: 'text', text: promptText }] }],
+    },
+    async () => ({
+      kind: 'enter',
+      messages: [
+        { source: { kind: 'system-prompt' }, content: [{ type: 'text', text: 'untrusted system injection' }] },
+        { source: { kind: 'user' }, content: [{ type: 'text', text: promptText }] },
+        { source: { kind: 'tool' }, content: [{ type: 'text', text: 'tool result' }] },
+      ],
+    }),
+  )
+  assert.equal(decision.messages.length, 2)
+  assert.equal(decision.messages.some((message) => message.source.kind === 'system-prompt'), false)
+
+  resolveResult({ stopReason: 'completed', structured: { decision: 'allow', reason: 'ok', riskLevel: 'low' }, output: [] })
+  assert.deepEqual(await pending, { kind: 'allow' })
+})
+
+test('falls back to the model reviewer when no subagent service is available', async () => {
+  const { pre, llmCalls } = setup('{"decision":"allow"}', { reviewerSubagent: true }, makeSession())
+  assert.deepEqual(await pre(makeExec(makeSession(), ESCALATION_ARGS), allowNext), { kind: 'allow' })
+  assert.equal(llmCalls(), 1)
 })

@@ -39,6 +39,35 @@
         description: Workspace-write sandbox; a reviewer model answers each request to escalate this one call to full access.
 
 - insert:
+    # A dedicated read-only agent preset for the reviewer child. It has only
+    # read/glob/grep and no agent-instructions/time-context rows, so AGENTS.md and
+    # project instructions cannot steer the safety verdict.
+    - id: preset-better-auto-review-readonly
+      name: '@deepseek-ai/dsh-agent-preset'
+      config:
+        id: better-auto-review-readonly
+        name: Auto Review (read-only)
+        description: Read-only reviewer used by Better Auto Review; can read, glob and grep, but never modify.
+        order: 90
+        plugins:
+          - id: persona
+            name: '@deepseek-ai/dsh-persona'
+            config:
+              prefix: You are a read-only safety reviewer. Inspect only when needed and never modify anything.
+              includeRuntimeContext: false
+          - id: tool-fs
+            name: '@deepseek-ai/dsh-tool-fs'
+            config:
+              read: true
+              readImage: false
+              write: false
+              edit: false
+              applyPatch: false
+          - id: tool-fs-search
+            name: '@deepseek-ai/dsh-tool-fs-search'
+            config:
+              sampleOverCapGlobResults: false
+
     - id: better-auto-review
       name: '@ericstonechina/better-auto-review'
       config:
@@ -52,6 +81,16 @@
         reviewerReasoningEffort: low
         reviewerTimeoutMs: 60000
         maxTokens: 800
+        # The reviewer runs as a read-only child agent by default. Its whitelist
+        # is enforced twice: by the preset above and by the tools/pre-execute gate.
+        reviewerSubagent: true
+        reviewerSubagentProvider: spawn
+        reviewerPreset: better-auto-review-readonly
+        reviewerTools:
+          - read
+          - glob
+          - grep
+        reviewerFallback: llm
         preset: auto-mode
         baselineSandbox: workspace-write
         maxConsecutiveDenials: 3

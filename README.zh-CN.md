@@ -55,7 +55,7 @@ pnpm add @ericstonechina/better-auto-review
 ```json
 {
   "dependencies": {
-    "@ericstonechina/better-auto-review": "^0.1.2"
+    "@ericstonechina/better-auto-review": "^0.1.3"
   },
   "dsh": {
     "profile": {
@@ -98,6 +98,14 @@ bundle 会把 **Better Auto Review** 设为新会话的默认预设（通过在 
     reviewerReasoningEffort: low
     reviewerTimeoutMs: 60000
     maxTokens: 800
+    reviewerSubagent: true
+    reviewerSubagentProvider: spawn
+    reviewerPreset: better-auto-review-readonly
+    reviewerTools:
+      - read
+      - glob
+      - grep
+    reviewerFallback: llm
     preset: auto-mode
     baselineSandbox: workspace-write
     maxConsecutiveDenials: 3
@@ -118,6 +126,11 @@ bundle 会把 **Better Auto Review** 设为新会话的默认预设（通过在 
 | `reviewerReasoningEffort` | `low` | 审查推理强度；低强度更快更省 |
 | `reviewerTimeoutMs` | `60000` | 单次审查硬超时；超时按失败处理 |
 | `maxTokens` | `800` | 审查输出上限 |
+| `reviewerSubagent` | `true` | 每次审查作为一个只读子代理运行，可自行查看工作区 |
+| `reviewerSubagentProvider` | `spawn` | 审查子代理使用的 DSH provider（`spawn` 不继承父会话历史） |
+| `reviewerPreset` | `better-auto-review-readonly` | 审查子代理的预设；只开放 `read`、`glob`、`grep` |
+| `reviewerTools` | `read`、`glob`、`grep` | 审查子代理的工具白名单；`structured_output` 始终允许 |
+| `reviewerFallback` | `llm` | 子代理无法启动时回退到内联审查模型；`deny` 表示直接 fail closed |
 | `preset` | `auto-mode` | 本插件生效的权限预设 |
 | `baselineSandbox` | `workspace-write` | 不高于此等级的请求不审查 |
 | `maxConsecutiveDenials` | `3` | 连续拒绝多少次后转人工 |
@@ -133,6 +146,8 @@ bundle 会把 **Better Auto Review** 设为新会话的默认预设（通过在 
 
 ## 审查输入
 
+默认情况下，审查器是一个全新的 `spawn` 子代理，运行在只读预设 `better-auto-review-readonly` 上。它只收到下面这份有界摘要，以及它自己通过 `read`/`glob`/`grep` 读取到的结果；`agent/pre-step` 防火墙会丢弃注入的 system、plugin 与 runtime-context 消息，因此项目说明无法操纵判决。
+
 - 当前工作目录；
 - 基线与请求的沙箱模式；
 - 最近 6 条真实用户消息（视为可信意图）；
@@ -141,7 +156,7 @@ bundle 会把 **Better Auto Review** 设为新会话的默认预设（通过在 
 
 审查模型被指示：允许日常开发工作以及本地诊断、修复（包括修复工作区的文件权限），只拒绝明确的高风险操作。宽泛的“继续”“修好它”或“总失败”的抱怨，足以授权可逆的本地修复；每次拒绝都必须给出具体理由。
 
-工具名、参数及其中的任何文本都按**不可信数据**处理，只有用户消息被视为授权来源。审查模型必须输出严格 JSON：
+工具名、参数及其中的任何文本都按**不可信数据**处理，只有用户消息被视为授权来源。审查子代理不能调用 `write`、`edit`、`apply_patch`、`pwsh`/shell 或 `run_code`；即使预设被改错，`tools/pre-execute` 也会以 `AUTO_REVIEW_READ_ONLY` 拒绝。审查模型必须通过 `structured_output` 工具提交严格 JSON：
 
 ```json
 {"decision":"allow","reason":"简短理由","riskLevel":"low"}
@@ -164,6 +179,7 @@ Better Auto Review 是**提权审查器**，不是沙箱的替代品。它的保
 - `workspace-write` 沙箱仍是主要防线；
 - 完全无视 DSH 沙箱、也不使用 `sandbox_permissions` 的第三方/MCP 工具不在本插件控制范围内，应由其自身权限机制约束；
 - 审查模型也会犯错：建议从 `workspace-write` 起步、保持 `onError: deny`，并用 `maxConsecutiveDenials` 尽早转人工。
+- 只读子代理是审查器的纵深防御层，不是主 agent 的新沙箱。子代理无法启动时，`reviewerFallback: llm` 会保留内联审查路径；设为 `deny` 则直接 fail closed。
 - 反复出现的 Windows 沙箱失败不会无限消耗审查额度：相同请求会命中短时判决缓存，单轮审查/失败预算和滑动拒绝熔断会把决定转给用户。
 
 ## 日志
@@ -178,7 +194,7 @@ npm run check   # 语法检查
 npm pack --dry-run
 ```
 
-测试用桩替代 DSH 宿主（权限预设、LLM 流、工具流水线、审批监听），无需安装 DSH 即可运行。
+测试用桩替代 DSH 宿主（权限预设、LLM 流、子代理服务、工具流水线、审批监听），无需安装 DSH 即可运行。
 
 ## 反馈
 

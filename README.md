@@ -55,7 +55,7 @@ Then add the bundle to the profile's `package.json`:
 ```json
 {
   "dependencies": {
-    "@ericstonechina/better-auto-review": "^0.1.2"
+    "@ericstonechina/better-auto-review": "^0.1.3"
   },
   "dsh": {
     "profile": {
@@ -98,6 +98,14 @@ Defaults live in the bundle's [cordis.patch.yml](cordis.patch.yml). Override the
     reviewerReasoningEffort: low
     reviewerTimeoutMs: 60000
     maxTokens: 800
+    reviewerSubagent: true
+    reviewerSubagentProvider: spawn
+    reviewerPreset: better-auto-review-readonly
+    reviewerTools:
+      - read
+      - glob
+      - grep
+    reviewerFallback: llm
     preset: auto-mode
     baselineSandbox: workspace-write
     maxConsecutiveDenials: 3
@@ -118,6 +126,11 @@ Defaults live in the bundle's [cordis.patch.yml](cordis.patch.yml). Override the
 | `reviewerReasoningEffort` | `low` | Reasoning effort for the reviewer; low keeps reviews fast and cheap |
 | `reviewerTimeoutMs` | `60000` | Hard timeout for one review; timeout fails closed |
 | `maxTokens` | `800` | Reviewer output cap |
+| `reviewerSubagent` | `true` | Run each review as a read-only child agent that can inspect the workspace |
+| `reviewerSubagentProvider` | `spawn` | DSH subagent provider used for the reviewer (`spawn` starts with no parent history) |
+| `reviewerPreset` | `better-auto-review-readonly` | Agent preset for the reviewer; only `read`, `glob` and `grep` |
+| `reviewerTools` | `read`, `glob`, `grep` | Tool whitelist enforced for the reviewer child; `structured_output` is always allowed |
+| `reviewerFallback` | `llm` | `llm` falls back to the inline reviewer if the child cannot start; `deny` fails closed instead |
 | `preset` | `auto-mode` | Permission preset this plugin is active on |
 | `baselineSandbox` | `workspace-write` | Anything at or below this rank is not reviewed |
 | `maxConsecutiveDenials` | `3` | Consecutive denials before a manual decision |
@@ -133,6 +146,8 @@ The reviewer can be any route your DSH LLM configuration exposes. It does not ha
 
 ## What the reviewer sees
 
+By default the reviewer is a fresh `spawn` child agent on the read-only `better-auto-review-readonly` preset. It receives only the bounded summary below plus its own `read`/`glob`/`grep` tool results; a `agent/pre-step` firewall drops injected system, plugin and runtime-context messages, so project instructions cannot steer the verdict.
+
 - current working directory;
 - baseline and requested sandbox modes;
 - the last six genuine user messages (treated as trusted intent);
@@ -141,7 +156,7 @@ The reviewer can be any route your DSH LLM configuration exposes. It does not ha
 
 The reviewer is instructed to allow routine development work and local diagnostics or repairs (including fixing workspace file permissions) and to deny only clear high-risk actions. A broad "continue", "fix it", or complaint that something keeps failing is enough intent for reversible local repair, and every denial must give a concrete reason.
 
-Tool names, arguments and any text inside them are treated as **untrusted data**; only user messages are treated as authorisation. The reviewer must answer with strict JSON:
+Tool names, arguments and any text inside them are treated as **untrusted data**; only user messages are treated as authorisation. The child cannot call `write`, `edit`, `apply_patch`, `pwsh`/shell or `run_code`; `tools/pre-execute` denies those with `AUTO_REVIEW_READ_ONLY` even if the preset were misconfigured. The reviewer must submit strict JSON through the `structured_output` tool:
 
 ```json
 {"decision":"allow","reason":"short reason","riskLevel":"low"}
@@ -164,6 +179,7 @@ Consequences:
 - The `workspace-write` sandbox is still the primary enforcement boundary.
 - A tool that ignores the DSH sandbox and does not use `sandbox_permissions` (for example, some third-party or MCP tools) is outside this plugin's control; rely on that tool's own permission model.
 - The reviewer is a model: it can be wrong. Start with `workspace-write`, keep `onError: deny`, and use `maxConsecutiveDenials` to pull a human in early.
+- The read-only child is a defense-in-depth layer for the reviewer, not a new sandbox for the main agent. If the child cannot start, `reviewerFallback: llm` keeps the inline reviewer path; use `deny` to fail closed instead.
 - A repeated Windows sandbox failure cannot spin the reviewer forever: identical requests hit a short-lived verdict cache, and review/failure budgets plus a sliding denial circuit fall back to a human instead of consuming unlimited quota.
 
 ## Logs
@@ -178,7 +194,7 @@ npm run check   # syntax check
 npm pack --dry-run
 ```
 
-The test harness stubs the DSH host (permission presets, LLM stream, tool pipeline, approval listener), so it runs without a DSH installation.
+The test harness stubs the DSH host (permission presets, LLM stream, subagent service, tool pipeline, approval listener), so it runs without a DSH installation.
 
 ## Feedback
 

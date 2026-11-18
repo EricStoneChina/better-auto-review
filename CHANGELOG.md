@@ -2,6 +2,16 @@
 
 All notable changes to this project are documented here. The format follows Keep a Changelog, and the project aims to follow Semantic Versioning.
 
+## [0.1.3] - 2026-11-18
+
+### Added
+
+- P1 read-only reviewer subagent. Each escalation is reviewed by a fresh `spawn` child agent on the new `better-auto-review-readonly` preset, which exposes only `read`, `glob` and `grep` and carries no `AGENTS.md`/agent-instructions context.
+- `reviewerSubagent`, `reviewerSubagentProvider`, `reviewerPreset`, `reviewerTools` and `reviewerFallback` configuration. The default `reviewerFallback: llm` keeps the inline reviewer path if the child cannot start.
+- `agent/pre-step` context firewall for reviewer children: only `user` and `tool` messages survive, so plugin/system/runtime injections cannot steer a verdict.
+- Defense-in-depth `tools/pre-execute` whitelist: any non-read tool called by a reviewer child is denied with `AUTO_REVIEW_READ_ONLY`, including `write`, `edit`, `apply_patch`, `pwsh` and `run_code`.
+- Tests for structured subagent verdicts, read-only tool enforcement, context filtering and inline fallback.
+
 ## [0.1.2] - 2026-11-18
 
 ### Added
