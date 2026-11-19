@@ -2,6 +2,14 @@
 
 All notable changes to this project are documented here. The format follows Keep a Changelog, and the project aims to follow Semantic Versioning.
 
+## [0.1.5] - 2026-11-19
+
+### Added
+
+- Native **Settings → Plugins → Better Auto Review** configuration page for the reviewer route: provider, model and reasoning effort can be selected without editing `cordis.patch.yml`.
+- The settings page clears the legacy `provider` / `model` aliases when saving, so leaving the form empty reliably returns the reviewer to the main agent's model.
+- Live Cordis config references are read at review time, so a reviewer model saved in the settings page takes effect on the next review without restarting the plugin.
+
 ## [0.1.4] - 2026-11-19
 
 ### Changed

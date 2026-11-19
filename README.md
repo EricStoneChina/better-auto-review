@@ -86,7 +86,9 @@ Sessions still on the built-in `auto` preset (or the earlier `auto-review` key) 
 
 ## Configuration
 
-Defaults live in the bundle's [cordis.patch.yml](cordis.patch.yml). Override them from your profile's `cordis.patch.yml` with the same row id:
+You normally do not need to edit YAML: **Settings → Plugins → Installed → Better Auto Review → Configure** opens a native reviewer settings page for provider, model and reasoning effort. Leave both provider and model empty to follow the current main model (recommended).
+
+Defaults live in the bundle's [cordis.patch.yml](cordis.patch.yml). The settings page and a profile `cordis.patch.yml` row with the same id can override them:
 
 ```yaml
 - id: better-auto-review
@@ -143,7 +145,7 @@ Defaults live in the bundle's [cordis.patch.yml](cordis.patch.yml). Override the
 | `verdictCacheMaxEntries` | `128` | Cache size cap |
 | `onError` | `deny` | `deny` (fail closed) or `ask` on reviewer failure |
 
-By default the reviewer follows the main agent's selected provider, model and reasoning effort at review time. The shared bundle therefore works on any DSH installation without a hard-coded model. To use a separate reviewer route, set **both** `reviewerProvider` and `reviewerModel` (setting only one is an error).
+By default the reviewer follows the main agent's selected provider, model and reasoning effort at review time. The shared bundle therefore works on any DSH installation without a hard-coded model. Leaving provider and model empty on the settings page keeps that default; to use a separate reviewer route, set **both** `reviewerProvider` and `reviewerModel` (setting only one is an error).
 
 ## What the reviewer sees
 

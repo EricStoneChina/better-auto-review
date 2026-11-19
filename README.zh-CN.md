@@ -86,7 +86,9 @@ bundle 会把 **Better Auto Review** 设为新会话的默认预设（通过在 
 
 ## 配置
 
-默认值在 bundle 的 [cordis.patch.yml](cordis.patch.yml)。可在 profile 的 `cordis.patch.yml` 中用同一个行 id 覆盖：
+大多数情况下不必手改 YAML：DSH 的 **设置 → 插件 → 已安装 → Better Auto Review → 配置** 提供审查模型设置页，可直接选择 provider、model 和 reasoning effort。把 provider 与 model 都留空时，审查器跟随当前主模型（推荐）。
+
+默认值在 bundle 的 [cordis.patch.yml](cordis.patch.yml)。也可以在上述设置页或 profile 的 `cordis.patch.yml` 中用同一个行 id 覆盖：
 
 ```yaml
 - id: better-auto-review
@@ -142,7 +144,7 @@ bundle 会把 **Better Auto Review** 设为新会话的默认预设（通过在 
 | `verdictCacheMaxEntries` | `128` | 缓存条数上限 |
 | `onError` | `deny` | 审查异常时 `deny`（fail closed）或 `ask` |
 
-默认情况下，审查器在每次审查时跟随主代理当前选择的 provider、模型和推理强度，所以共享 bundle 不需要硬编码任何模型，能在任意 DSH 安装上工作。若要使用单独的审查路由，必须**同时**设置 `reviewerProvider` 和 `reviewerModel`（只设置其中一个会报错）。
+默认情况下，审查器在每次审查时跟随主代理当前选择的 provider、模型和推理强度，所以共享 bundle 不需要硬编码任何模型，能在任意 DSH 安装上工作。设置页中的 provider 与 model 留空即使用这个默认；若要使用单独的审查路由，必须**同时**设置 `reviewerProvider` 和 `reviewerModel`（只设置其中一个会报错）。
 
 ## 审查输入
 

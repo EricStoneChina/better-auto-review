@@ -1,7 +1,7 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
 
-import { apply } from '../lib/index.js'
+import { apply, Config } from '../lib/index.js'
 
 const ESCALATION_ARGS = {
   path: 'C:/outside/x.txt',
@@ -247,6 +247,66 @@ test('uses the dedicated reviewer route and reasoning effort', async () => {
   assert.equal(options.provider, 'reviewer-provider')
   assert.equal(options.model, 'reviewer-model')
   assert.equal(options.reasoningEffort, 'low')
+})
+
+test('reads a live reviewer route from Cordis config references', async () => {
+  let provider = 'reviewer-a'
+  let model = 'model-a'
+  let effort = 'low'
+  const config = {
+    reviewerProvider: { get: () => provider },
+    reviewerModel: { get: () => model },
+    reviewerReasoningEffort: { get: () => effort },
+    verdictCacheTtlMs: 0,
+  }
+  const { pre, ctx } = setup('{"decision":"allow","riskLevel":"low"}', config)
+  const session = makeSession()
+  await pre(makeExec(session, ESCALATION_ARGS, 'c1'), allowNext)
+  provider = 'reviewer-b'
+  model = 'model-b'
+  effort = 'high'
+  await pre(makeExec(session, { ...ESCALATION_ARGS, path: 'C:/outside/y.txt' }, 'c2'), allowNext)
+  const calls = ctx.log.filter((entry) => entry[0] === 'llm')
+  assert.equal(calls[0][1], 'reviewer-a')
+  assert.equal(calls[0][2], 'model-a')
+  assert.equal(calls[0][3].reasoningEffort, 'low')
+  assert.equal(calls[1][1], 'reviewer-b')
+  assert.equal(calls[1][2], 'model-b')
+  assert.equal(calls[1][3].reasoningEffort, 'high')
+})
+
+test('exposes only the reviewer route as volatile settings fields', () => {
+  const fields = Config.dict || {}
+  const volatile = Object.entries(fields)
+    .filter(([, field]) => field.meta?.volatile)
+    .map(([key]) => key)
+    .sort()
+  assert.deepEqual(volatile, [
+    'model',
+    'provider',
+    'reasoningEffort',
+    'reviewerModel',
+    'reviewerProvider',
+    'reviewerReasoningEffort',
+  ])
+  assert.equal(fields.reviewerSubagent?.meta?.volatile, undefined)
+  assert.equal(fields.maxTokens?.meta?.volatile, undefined)
+  // DSH writes the row back through Schemastery simplify(); ordinary
+  // deployment fields must survive or the first settings save drops them.
+  const kept = Config.simplify({
+    reviewerProvider: 'reviewer-x',
+    reviewerSubagent: true,
+    maxTokens: 800,
+    preset: 'auto-mode',
+    reviewerTools: ['read', 'glob'],
+    onError: 'deny',
+  })
+  assert.equal(kept.reviewerProvider, 'reviewer-x')
+  assert.equal(kept.reviewerSubagent, true)
+  assert.equal(kept.maxTokens, 800)
+  assert.equal(kept.preset, 'auto-mode')
+  assert.deepEqual(kept.reviewerTools, ['read', 'glob'])
+  assert.equal(kept.onError, 'deny')
 })
 
 test('defaults the reviewer route to the main agent model', async () => {
